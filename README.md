@@ -57,7 +57,6 @@ Where the criteria are implemented:
 ## Adaptive UI mockups
 
 - **Figma:** https://www.figma.com/design/YfUGStJHBuPh6xdfQIKPMn
-- **PDF (same mockups):** [`design/mockups/Mood-Swing-adaptive-ui-mockups.pdf`](design/mockups/Mood-Swing-adaptive-ui-mockups.pdf)
 - **Design tokens:** [`design/tokens/themes.css`](design/tokens/themes.css), used by the app and mirrored as variables in Figma
 - **Themes:** Golden Vinyl (light) and Walkman Black (dark)
 

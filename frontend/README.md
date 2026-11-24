@@ -67,7 +67,7 @@ docs/         architecture, user flows, tech stack
 
 ## Adaptive UI (stage 3)
 
-- **Mockups in Figma:** https://www.figma.com/design/YfUGStJHBuPh6xdfQIKPMn (components, phone / tablet / desktop, both themes). PDF copy: [`../design/mockups/Mood-Swing-adaptive-ui-mockups.pdf`](../design/mockups/Mood-Swing-adaptive-ui-mockups.pdf).
+- **Mockups in Figma:** https://www.figma.com/design/YfUGStJHBuPh6xdfQIKPMn (components, phone / tablet / desktop, both themes).
 - **Layouts:** bottom tab bar under 768 px, top bar from 768 px, sidebar from 1100 px; main navigation is present on all of them (`components/AppShell.tsx`).
 - **Checks:** `e2e/responsive.spec.ts` (phone, tablet, desktop, landscape, zoom) and `scripts/responsive-audit.cjs` (overflow, overlaps, targets under 44 px, clipped text). Colour contrast of the tokens is at least 4.5:1.
 - **Not covered by automation:** real devices, screen readers.
