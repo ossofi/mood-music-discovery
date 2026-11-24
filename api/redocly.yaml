@@ -1,0 +1,5 @@
+extends:
+  - recommended
+rules:
+  operation-4xx-response: off      # /health is public and has no client-error case
+  no-server-example.com: off       # localhost servers are intentional (dev + mock)

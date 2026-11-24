@@ -1,0 +1,939 @@
+openapi: 3.1.0
+info:
+  title: Mood-Based Music Discovery API
+  version: 1.0.0
+  summary: REST API for the mood quiz, playlist generation, track context and personal feed.
+  description: |
+    Backend API of the Mood-Based Music Discovery web application. A listener takes a short mood quiz,
+    receives a ranked playlist with an explanation of every position, and reads context (facts, related
+    genres, a lyrics link) next to each track.
+
+    **Start here:** `docs/getting-started.md`, then `docs/tutorial-quiz-to-playlist.md`.
+
+    ## Conventions
+    - Base path `/api/v1`. Breaking changes ship as a new major version path (`/api/v2`); additive changes stay in v1 and are listed in `docs/changelog.md`.
+    - JSON everywhere (`application/json`); errors use `application/problem+json` (RFC 9457) with a stable `code`.
+    - Authentication: `Authorization: Bearer <accessToken>` on every endpoint except register, login and health. Tokens live 24 hours.
+    - Timestamps are ISO 8601 in UTC. Identifiers are positive integers.
+    - Lists use cursor pagination (`limit`, `cursor` -> `nextCursor`).
+    - Rate limits: login is limited to 5 failed attempts per 15 minutes per account/IP; exceeding it returns `429` with `Retry-After`.
+
+    ## Security notes
+    Never log or store access tokens in source code. Passwords are sent only over HTTPS and are stored as bcrypt hashes
+    (work factor 12 or higher). Mood answers are treated as listening preferences, not health data.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development (Docker Compose)
+  - url: http://localhost:4010
+    description: "Mock server (Prism): same paths WITHOUT the /api/v1 prefix, example responses taken from this file"
+tags:
+  - name: Auth
+    description: Registration, login and logout.
+  - name: Profile
+    description: The current user, consent for listening history, account erasure.
+  - name: Quiz
+    description: Quiz questions and quiz sessions.
+  - name: Playlists
+    description: Generated playlists, regeneration with another familiar/discovery balance, mood-fit rating.
+  - name: Catalogue
+    description: Track and artist pages with source-attributed facts.
+  - name: Activity
+    description: Listening events and the personal feed.
+  - name: System
+    description: Health check.
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Create an account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            examples:
+              typical:
+                summary: Typical registration
+                value: { email: alice@example.com, password: "correct-horse-battery", displayName: Alice }
+      responses:
+        '201':
+          description: Account created; the user is signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+              examples:
+                created: { $ref: '#/components/examples/AuthResponseExample' }
+        '409':
+          description: E-mail already registered (`EMAIL_ALREADY_REGISTERED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                duplicate:
+                  value:
+                    type: https://api.moodmusic.example/problems/email-already-registered
+                    title: E-mail already registered
+                    status: 409
+                    code: EMAIL_ALREADY_REGISTERED
+                    detail: An account with this e-mail already exists.
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in
+      description: Returns a 24-hour bearer token. Five failed attempts within 15 minutes lock further attempts temporarily.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            examples:
+              typical:
+                value: { email: alice@example.com, password: "correct-horse-battery" }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+              examples:
+                ok: { $ref: '#/components/examples/AuthResponseExample' }
+        '401':
+          description: Wrong e-mail or password (`INVALID_CREDENTIALS`). The message never says which of the two was wrong.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                wrong:
+                  value:
+                    type: https://api.moodmusic.example/problems/invalid-credentials
+                    title: Invalid credentials
+                    status: 401
+                    code: INVALID_CREDENTIALS
+                    detail: E-mail or password is incorrect.
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Sign out and invalidate the token
+      responses:
+        '204': { description: Signed out. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /users/me:
+    get:
+      tags: [Profile]
+      operationId: getMe
+      summary: Current user
+      responses:
+        '200':
+          description: The signed-in user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+              examples:
+                alice: { $ref: '#/components/examples/UserExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Profile]
+      operationId: updateMe
+      summary: Change display name or listening-history consent
+      description: |
+        `historyConsent: true` is the legal basis (consent, GDPR Art. 6(1)(a)) for storing listening history.
+        Setting it to `false` stops new recording; existing history is removed by `DELETE /users/me/history`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+            examples:
+              consent: { value: { historyConsent: true } }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+              examples:
+                alice: { $ref: '#/components/examples/UserExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Profile]
+      operationId: deleteMe
+      summary: Delete the account and all its data (right to erasure)
+      responses:
+        '204': { description: "Account, quiz sessions, playlists and history deleted." }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /users/me/history:
+    delete:
+      tags: [Profile]
+      operationId: deleteMyHistory
+      summary: Delete listening history only
+      responses:
+        '204': { description: Listening history deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /quiz:
+    get:
+      tags: [Quiz]
+      operationId: getQuiz
+      summary: Active quiz questions with their answer options
+      responses:
+        '200':
+          description: 3 to 5 questions in display order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quiz' }
+              examples:
+                quiz: { $ref: '#/components/examples/QuizExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /quiz-sessions:
+    post:
+      tags: [Quiz]
+      operationId: createQuizSession
+      summary: Submit a completed quiz
+      description: |
+        Every active question must be answered exactly once, with an option that belongs to that question.
+        An incomplete or inconsistent quiz is rejected with `422` (`QUIZ_INCOMPLETE` or `VALIDATION_ERROR`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateQuizSessionRequest' }
+            examples:
+              calm:
+                summary: Tired, wants comfort, winding down, slow pace
+                value:
+                  familiarWeight: 0.5
+                  answers:
+                    - { questionId: 1, optionId: 1 }
+                    - { questionId: 2, optionId: 5 }
+                    - { questionId: 3, optionId: 9 }
+                    - { questionId: 4, optionId: 13 }
+      responses:
+        '201':
+          description: Session stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizSession' }
+              examples:
+                created: { $ref: '#/components/examples/QuizSessionExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: Incomplete quiz (`QUIZ_INCOMPLETE`) or an answer that does not match its question (`VALIDATION_ERROR`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                incomplete:
+                  value:
+                    type: https://api.moodmusic.example/problems/quiz-incomplete
+                    title: Quiz incomplete
+                    status: 422
+                    code: QUIZ_INCOMPLETE
+                    detail: 2 of 4 required questions were answered.
+        '500': { $ref: '#/components/responses/InternalError' }
+  /quiz-sessions/{sessionId}/playlists:
+    post:
+      tags: [Playlists]
+      operationId: generatePlaylist
+      summary: Generate a playlist for a quiz session
+      description: |
+        Ranking: `score = sum(mood weight x track tag weight) x balance`, where the balance multiplier is
+        `0.5 + familiarWeight` for tracks the user already heard and `1.5 - familiarWeight` for new tracks.
+        Ties are broken by the lower track id, so the same input always gives the same playlist.
+        Calling this again with another `familiarWeight` creates a **new** playlist for the same session.
+        If fewer than `limit` tracks match, all matches are returned and `limitationNotice` explains it.
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GeneratePlaylistRequest' }
+            examples:
+              discovery: { value: { limit: 10, familiarWeight: 0.2 } }
+      responses:
+        '201':
+          description: Playlist generated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Playlist' }
+              examples:
+                fewMatches: { $ref: '#/components/examples/PlaylistExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /playlists:
+    get:
+      tags: [Playlists]
+      operationId: listPlaylists
+      summary: The user's previous playlists, newest first
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: A page of playlist summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlaylistPage' }
+              examples:
+                page:
+                  value:
+                    items:
+                      - { playlistId: 1, sessionId: 1, familiarWeight: 0.5, generatedAt: "2026-11-23T09:15:00Z", trackCount: 9, moodFitRating: 5 }
+                    nextCursor: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /playlists/{playlistId}:
+    get:
+      tags: [Playlists]
+      operationId: getPlaylist
+      summary: A playlist with explanations
+      parameters:
+        - { $ref: '#/components/parameters/PlaylistId' }
+      responses:
+        '200':
+          description: The playlist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Playlist' }
+              examples:
+                fewMatches: { $ref: '#/components/examples/PlaylistExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /playlists/{playlistId}/rating:
+    put:
+      tags: [Playlists]
+      operationId: ratePlaylist
+      summary: Rate how well a playlist fits the mood (KPI-02)
+      description: "Idempotent: sending the same rating again changes nothing; a different rating replaces the old one."
+      parameters:
+        - { $ref: '#/components/parameters/PlaylistId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RatingRequest' }
+            examples:
+              good: { value: { moodFitRating: 4 } }
+      responses:
+        '200':
+          description: Rating stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rating' }
+              examples:
+                stored: { value: { playlistId: 1, moodFitRating: 4, ratedAt: "2026-11-23T09:20:00Z" } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /tracks/{trackId}:
+    get:
+      tags: [Catalogue]
+      operationId: getTrack
+      summary: Track page with context
+      parameters:
+        - { $ref: '#/components/parameters/TrackId' }
+      responses:
+        '200':
+          description: Track with facts, related genres, embed identifiers and a lyrics link.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrackDetail' }
+              examples:
+                track: { $ref: '#/components/examples/TrackExample' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /artists/{artistId}:
+    get:
+      tags: [Catalogue]
+      operationId: getArtist
+      summary: Artist page
+      parameters:
+        - { $ref: '#/components/parameters/ArtistId' }
+      responses:
+        '200':
+          description: Artist with genres, facts and tracks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtistDetail' }
+              examples:
+                artist:
+                  value:
+                    artistId: 6
+                    name: Metallica
+                    originCountry: US
+                    formedYear: 1981
+                    genres: [Metal, Rock]
+                    facts:
+                      - { factId: 6, factType: history, text: "Formed in Los Angeles in 1981.", source: { name: Manual curation, url: "https://en.wikipedia.org/wiki/Metallica" } }
+                    tracks:
+                      - { trackId: 6, title: Master of Puppets, releaseYear: 1986 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /listening-events:
+    post:
+      tags: [Activity]
+      operationId: recordListeningEvent
+      summary: Record that a track was played
+      description: |
+        Stored only if the user gave consent for listening history; otherwise `403` with
+        `HISTORY_CONSENT_REQUIRED`. Send an `Idempotency-Key` header so a retry after a network error
+        does not create a duplicate event; the same key returns the first response for 24 hours.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ListeningEventRequest' }
+            examples:
+              played: { value: { trackId: 12, playlistId: 1, listenedSeconds: 42 } }
+      responses:
+        '201':
+          description: Event stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListeningEvent' }
+              examples:
+                stored: { value: { eventId: 101, trackId: 12, playlistId: 1, startedAt: "2026-11-23T09:16:00Z", listenedSeconds: 42 } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Listening history is switched off for this account (`HISTORY_CONSENT_REQUIRED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                noConsent:
+                  value:
+                    type: https://api.moodmusic.example/problems/history-consent-required
+                    title: Listening history is switched off
+                    status: 403
+                    code: HISTORY_CONSENT_REQUIRED
+                    detail: Enable listening history in your profile to record plays.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /feed:
+    get:
+      tags: [Activity]
+      operationId: getFeed
+      summary: Personal feed of facts about artists and tracks the user listened to
+      description: Empty for users without consent or without history. Most recently listened first.
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: A page of feed items.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedPage' }
+              examples:
+                page:
+                  value:
+                    items:
+                      - factId: 2
+                        factType: creation
+                        text: "Composed by saxophonist Paul Desmond and written in 5/4 time."
+                        source: { name: Manual curation, url: "https://en.wikipedia.org/wiki/Take_Five" }
+                        lastListenedAt: "2026-11-22T20:00:00Z"
+                    nextCursor: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Liveness and database check
+      security: []
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              examples:
+                ok: { value: { status: ok, database: up, version: 1.0.0 } }
+        '503':
+          description: The database is unreachable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              examples:
+                down: { value: { status: degraded, database: down, version: 1.0.0 } }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Token from `POST /auth/login`, valid 24 hours. Send `Authorization: Bearer <token>`."
+  parameters:
+    SessionId: { name: sessionId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 }, example: 1 }
+    PlaylistId: { name: playlistId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 }, example: 1 }
+    TrackId: { name: trackId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 }, example: 12 }
+    ArtistId: { name: artistId, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 }, example: 6 }
+    Limit: { name: limit, in: query, required: false, description: Page size., schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+    Cursor: { name: cursor, in: query, required: false, description: Opaque cursor from `nextCursor` of the previous page., schema: { type: string } }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Client-generated UUID. A retry with the same key within 24 hours returns the first result.
+      schema: { type: string, format: uuid }
+      example: 6f9619ff-8b86-4d11-b42d-00c04fc964ff
+  responses:
+    Unauthorized:
+      description: Missing, invalid or expired token (`UNAUTHENTICATED` or `TOKEN_EXPIRED`). Sign in again.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            expired:
+              value:
+                type: https://api.moodmusic.example/problems/token-expired
+                title: Token expired
+                status: 401
+                code: TOKEN_EXPIRED
+                detail: The access token has expired. Sign in again.
+    NotFound:
+      description: The resource does not exist or belongs to another user (`NOT_FOUND`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            missing:
+              value:
+                type: https://api.moodmusic.example/problems/not-found
+                title: Not found
+                status: 404
+                code: NOT_FOUND
+                detail: Playlist 999 was not found.
+    ValidationError:
+      description: The request body or parameters are invalid (`VALIDATION_ERROR`); `errors` lists each field.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            fields:
+              value:
+                type: https://api.moodmusic.example/problems/validation-error
+                title: Validation failed
+                status: 422
+                code: VALIDATION_ERROR
+                detail: One or more fields are invalid.
+                errors:
+                  - { field: email, message: Must be a valid e-mail address. }
+    TooManyRequests:
+      description: Too many failed attempts (`RATE_LIMITED`). Wait for `Retry-After` seconds.
+      headers:
+        Retry-After: { description: Seconds to wait., schema: { type: integer, minimum: 1 } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            limited:
+              value:
+                type: https://api.moodmusic.example/problems/rate-limited
+                title: Too many attempts
+                status: 429
+                code: RATE_LIMITED
+                detail: Try again in 600 seconds.
+    InternalError:
+      description: Unexpected server error (`INTERNAL_ERROR`). Retry later; quote `traceId` when reporting it.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          examples:
+            error:
+              value:
+                type: https://api.moodmusic.example/problems/internal-error
+                title: Internal error
+                status: 500
+                code: INTERNAL_ERROR
+                detail: Something went wrong on our side.
+                traceId: 0f3a9c2e7b1d4c58
+  schemas:
+    Problem:
+      type: object
+      description: Error body (RFC 9457 problem details) with a stable machine-readable `code`.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code:
+          type: string
+          enum: [VALIDATION_ERROR, QUIZ_INCOMPLETE, UNAUTHENTICATED, TOKEN_EXPIRED, INVALID_CREDENTIALS, FORBIDDEN, HISTORY_CONSENT_REQUIRED, NOT_FOUND, EMAIL_ALREADY_REGISTERED, RATE_LIMITED, INTERNAL_ERROR]
+        detail: { type: string }
+        traceId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 10, maxLength: 72, description: "At most 72 bytes because bcrypt ignores the rest.", writeOnly: true }
+        displayName: { type: string, minLength: 1, maxLength: 50 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, writeOnly: true }
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, description: Lifetime in seconds (86400)., example: 86400 }
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      required: [userId, email, historyConsent, createdAt]
+      properties:
+        userId: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        displayName: { type: [string, 'null'] }
+        historyConsent: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 50 }
+        historyConsent: { type: boolean }
+    Quiz:
+      type: object
+      required: [questions]
+      properties:
+        questions:
+          type: array
+          minItems: 3
+          maxItems: 5
+          items: { $ref: '#/components/schemas/QuizQuestion' }
+    QuizQuestion:
+      type: object
+      required: [questionId, position, prompt, options]
+      properties:
+        questionId: { type: integer }
+        position: { type: integer, minimum: 1, maximum: 5 }
+        prompt: { type: string }
+        options:
+          type: array
+          items:
+            type: object
+            required: [optionId, label]
+            properties:
+              optionId: { type: integer }
+              label: { type: string }
+    CreateQuizSessionRequest:
+      type: object
+      required: [answers]
+      additionalProperties: false
+      properties:
+        familiarWeight: { type: number, minimum: 0, maximum: 1, default: 0.5, description: "0 = only new tracks, 1 = strongly prefer tracks already heard." }
+        answers:
+          type: array
+          minItems: 3
+          maxItems: 5
+          items:
+            type: object
+            required: [questionId, optionId]
+            additionalProperties: false
+            properties:
+              questionId: { type: integer }
+              optionId: { type: integer }
+    QuizSession:
+      type: object
+      required: [sessionId, quizDate, familiarWeight, answerCount]
+      properties:
+        sessionId: { type: integer, format: int64 }
+        quizDate: { type: string, format: date }
+        familiarWeight: { type: number }
+        answerCount: { type: integer }
+    GeneratePlaylistRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        familiarWeight: { type: number, minimum: 0, maximum: 1, description: Overrides the value stored in the session. }
+    ArtistRef:
+      type: object
+      required: [artistId, name]
+      properties:
+        artistId: { type: integer, format: int64 }
+        name: { type: string }
+    PlaylistItem:
+      type: object
+      required: [position, trackId, title, artist, score, isFamiliar, matchedTags]
+      properties:
+        position: { type: integer, minimum: 1 }
+        trackId: { type: integer, format: int64 }
+        title: { type: string }
+        artist: { $ref: '#/components/schemas/ArtistRef' }
+        releaseYear: { type: [integer, 'null'] }
+        score: { type: number, minimum: 0 }
+        isFamiliar: { type: boolean, description: The user had listened to this track before the playlist was generated. }
+        matchedTags: { type: array, items: { type: string }, description: Mood tags shared by the track and the quiz result (the explanation). }
+    Playlist:
+      type: object
+      required: [playlistId, sessionId, familiarWeight, generatedAt, requestedLimit, items, moodFitRating, limitationNotice]
+      properties:
+        playlistId: { type: integer, format: int64 }
+        sessionId: { type: integer, format: int64 }
+        familiarWeight: { type: number }
+        generatedAt: { type: string, format: date-time }
+        requestedLimit: { type: integer }
+        moodFitRating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        limitationNotice: { type: [string, 'null'], description: Set when fewer tracks than requested matched. }
+        items: { type: array, items: { $ref: '#/components/schemas/PlaylistItem' } }
+    PlaylistSummary:
+      type: object
+      required: [playlistId, sessionId, familiarWeight, generatedAt, trackCount, moodFitRating]
+      properties:
+        playlistId: { type: integer, format: int64 }
+        sessionId: { type: integer, format: int64 }
+        familiarWeight: { type: number }
+        generatedAt: { type: string, format: date-time }
+        trackCount: { type: integer }
+        moodFitRating: { type: [integer, 'null'] }
+    PlaylistPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PlaylistSummary' } }
+        nextCursor: { type: [string, 'null'] }
+    RatingRequest:
+      type: object
+      required: [moodFitRating]
+      additionalProperties: false
+      properties:
+        moodFitRating: { type: integer, minimum: 1, maximum: 5 }
+    Rating:
+      type: object
+      required: [playlistId, moodFitRating, ratedAt]
+      properties:
+        playlistId: { type: integer, format: int64 }
+        moodFitRating: { type: integer, minimum: 1, maximum: 5 }
+        ratedAt: { type: string, format: date-time }
+    Source:
+      type: object
+      required: [name, url]
+      properties:
+        name: { type: string }
+        url: { type: string, format: uri }
+    Fact:
+      type: object
+      required: [factId, factType, text, source]
+      properties:
+        factId: { type: integer, format: int64 }
+        factType: { type: string, enum: [history, creation, influence, trivia] }
+        text: { type: string, minLength: 10, maxLength: 500 }
+        source: { $ref: '#/components/schemas/Source' }
+    RelatedGenre:
+      type: object
+      required: [genre, relationType, relatedGenre]
+      properties:
+        genre: { type: string }
+        relationType: { type: string, enum: [root_of, subgenre_of, related_to] }
+        relatedGenre: { type: string }
+    Embed:
+      type: object
+      description: Identifier for an official embedded player. No audio is served by this API.
+      required: [provider, id]
+      properties:
+        provider: { type: string, enum: [spotify, deezer] }
+        id: { type: string }
+    TrackDetail:
+      type: object
+      required: [trackId, title, artist, genres, tags, facts, relatedGenres, embeds, lyrics]
+      properties:
+        trackId: { type: integer, format: int64 }
+        title: { type: string }
+        releaseYear: { type: [integer, 'null'] }
+        artist: { $ref: '#/components/schemas/ArtistRef' }
+        genres: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        facts: { type: array, items: { $ref: '#/components/schemas/Fact' } }
+        relatedGenres: { type: array, items: { $ref: '#/components/schemas/RelatedGenre' }, description: "Metadata associations, not verified lineage." }
+        embeds: { type: array, items: { $ref: '#/components/schemas/Embed' } }
+        lyrics:
+          type: [object, 'null']
+          description: Link to a licensed lyrics provider and an optional short excerpt (at most 200 characters). `null` if unavailable.
+          required: [url]
+          properties:
+            url: { type: string, format: uri }
+            excerpt: { type: [string, 'null'], maxLength: 200 }
+    ArtistDetail:
+      type: object
+      required: [artistId, name, genres, facts, tracks]
+      properties:
+        artistId: { type: integer, format: int64 }
+        name: { type: string }
+        originCountry: { type: [string, 'null'], pattern: '^[A-Z]{2}$' }
+        formedYear: { type: [integer, 'null'] }
+        genres: { type: array, items: { type: string } }
+        facts: { type: array, items: { $ref: '#/components/schemas/Fact' } }
+        tracks:
+          type: array
+          items:
+            type: object
+            required: [trackId, title]
+            properties:
+              trackId: { type: integer, format: int64 }
+              title: { type: string }
+              releaseYear: { type: [integer, 'null'] }
+    ListeningEventRequest:
+      type: object
+      required: [trackId, listenedSeconds]
+      additionalProperties: false
+      properties:
+        trackId: { type: integer, format: int64 }
+        playlistId: { type: integer, format: int64 }
+        listenedSeconds: { type: integer, minimum: 0, maximum: 86400 }
+    ListeningEvent:
+      type: object
+      required: [eventId, trackId, startedAt, listenedSeconds]
+      properties:
+        eventId: { type: integer, format: int64 }
+        trackId: { type: integer, format: int64 }
+        playlistId: { type: [integer, 'null'], format: int64 }
+        startedAt: { type: string, format: date-time }
+        listenedSeconds: { type: integer }
+    FeedItem:
+      type: object
+      required: [factId, factType, text, source, lastListenedAt]
+      properties:
+        factId: { type: integer, format: int64 }
+        factType: { type: string, enum: [history, creation, influence, trivia] }
+        text: { type: string }
+        source: { $ref: '#/components/schemas/Source' }
+        lastListenedAt: { type: string, format: date-time }
+    FeedPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FeedItem' } }
+        nextCursor: { type: [string, 'null'] }
+    Health:
+      type: object
+      required: [status, database, version]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        database: { type: string, enum: [up, down] }
+        version: { type: string }
+  examples:
+    UserExample:
+      value: { userId: 1, email: alice@example.com, displayName: Alice, historyConsent: true, createdAt: "2026-11-20T10:00:00Z" }
+    AuthResponseExample:
+      value:
+        accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature-placeholder
+        tokenType: Bearer
+        expiresIn: 86400
+        user: { userId: 1, email: alice@example.com, displayName: Alice, historyConsent: true, createdAt: "2026-11-20T10:00:00Z" }
+    QuizExample:
+      value:
+        questions:
+          - questionId: 1
+            position: 1
+            prompt: How is your energy right now?
+            options:
+              - { optionId: 1, label: Low and tired }
+              - { optionId: 2, label: Steady }
+              - { optionId: 3, label: Up for it }
+              - { optionId: 4, label: Wired and restless }
+          - questionId: 2
+            position: 2
+            prompt: How do you want to feel?
+            options:
+              - { optionId: 5, label: Comforted }
+              - { optionId: 6, label: Lifted }
+              - { optionId: 7, label: Challenged }
+              - { optionId: 8, label: Let it all out }
+          - questionId: 3
+            position: 3
+            prompt: What are you doing?
+            options:
+              - { optionId: 9, label: Winding down }
+              - { optionId: 10, label: Working or studying }
+              - { optionId: 11, label: Driving or moving }
+              - { optionId: 12, label: Late at night }
+          - questionId: 4
+            position: 4
+            prompt: What pace suits you?
+            options:
+              - { optionId: 13, label: Slow burn }
+              - { optionId: 14, label: Mid-tempo }
+              - { optionId: 15, label: Driving }
+              - { optionId: 16, label: Pounding }
+    QuizSessionExample:
+      value: { sessionId: 1, quizDate: "2026-11-23", familiarWeight: 0.5, answerCount: 4 }
+    PlaylistExample:
+      summary: Only 3 of the requested 10 tracks matched, so the notice is set.
+      value:
+        playlistId: 1
+        sessionId: 1
+        familiarWeight: 0.5
+        generatedAt: "2026-11-23T09:15:00Z"
+        requestedLimit: 10
+        moodFitRating: null
+        limitationNotice: "Only 3 tracks matched your mood; showing all of them."
+        items:
+          - { position: 1, trackId: 12, title: Wish You Were Here, artist: { artistId: 12, name: Pink Floyd }, releaseYear: 1975, score: 2.42, isFamiliar: true, matchedTags: [Calm, Melancholic, Nostalgic] }
+          - { position: 2, trackId: 3, title: So What, artist: { artistId: 3, name: Miles Davis }, releaseYear: 1959, score: 2.24, isFamiliar: true, matchedTags: [Calm, Relaxed] }
+          - { position: 3, trackId: 9, title: Take Five, artist: { artistId: 9, name: The Dave Brubeck Quartet }, releaseYear: 1959, score: 2.1, isFamiliar: false, matchedTags: [Calm, Relaxed] }
+    TrackExample:
+      value:
+        trackId: 9
+        title: Take Five
+        releaseYear: 1959
+        artist: { artistId: 9, name: The Dave Brubeck Quartet }
+        genres: [Jazz]
+        tags: [Relaxed, Focused, Calm]
+        facts:
+          - { factId: 2, factType: creation, text: "Composed by saxophonist Paul Desmond and written in 5/4 time.", source: { name: Manual curation, url: "https://en.wikipedia.org/wiki/Take_Five" } }
+        relatedGenres:
+          - { genre: Jazz, relationType: related_to, relatedGenre: Blues }
+        embeds:
+          - { provider: spotify, id: spotify-track-id-placeholder }
+        lyrics: null
