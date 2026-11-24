@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph Browser["Browser (SPA)"]
+    Router["React Router<br/>routes + ProtectedRoute"] --> Pages["Pages<br/>Login, Quiz, Playlist, Feed, Profile"]
+    Pages --> Hooks["TanStack Query hooks<br/>api/queries.ts"]
+    Pages --> Stores["Zustand stores<br/>auth, theme, toasts"]
+    Hooks --> Client["API client<br/>api/client.ts"]
+    Client -->|"401 / 5xx / network"| Err["Global error handler<br/>toast + sign-out"]
+    Err --> Stores
+    Stores --> Theme["themes.css tokens<br/>data-theme on html"]
+  end
+  Client -->|"REST /api/v1<br/>JSON + problem+json"| API["Backend API<br/>(openapi.yaml)"]
+  Client -.->|"VITE_API_MOCK=true"| MSW["MSW mock server<br/>mocks/handlers.ts"]
+  API --> DB[("PostgreSQL")]

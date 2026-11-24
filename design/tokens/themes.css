@@ -1,0 +1,76 @@
+/* =====================================================================
+   themes.css | Design tokens for Mood-Based Music Discovery
+   Components use ONLY var(--token) names. A theme is one [data-theme] block.
+   To add a theme: copy a block, rename it, change the values, check contrast
+   (text >= 4.5:1; borders, focus ring and large headings >= 3:1), then add it to the theme switcher.
+   Apply with <html data-theme="era-60-70"> or <html data-theme="era-80-90">.
+   ===================================================================== */
+
+/* ---------- Shared, theme-independent tokens ---------- */
+:root {
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
+  --space-5: 1.5rem; --space-6: 2rem; --space-7: 3rem;
+  --text-sm: .875rem; --text-md: 1rem; --text-lg: 1.25rem; --text-xl: 1.75rem; --text-2xl: clamp(2rem, 5vw, 3rem);
+  --tap-min: 44px;                 /* minimum touch target (rubric: 44px) */
+}
+
+/* ---------- Theme 1: 60s-70s (light) ----------
+   Mood: kraft paper with grain, one-ink burgundy prints, groovy script titles. */
+[data-theme="era-60-70"] {
+  color-scheme: light;
+  --font-display: "Shrikhand", "Georgia", serif;
+  --font-body: "Josefin Sans", "Trebuchet MS", sans-serif;
+  --display-transform: none; --display-tracking: 0;
+  --bg: #D9C8A6;           /* kraft paper */
+  --surface: #F2E8D2;
+  --surface-2: #E4D5B3;
+  --text: #1B1410;
+  --text-muted: #54402F;
+  --heading: #7A2230;
+  --primary: #7A2230;
+  --on-primary: #F6EBD6;
+  --accent: #79ac98;       /* teal: selected option */
+  --on-accent: #1B1410;
+  --border: #7A2230;
+  --danger: #A3231B;
+  --link: #7A2230;
+  --focus: #1B1410;
+  --radius: 12px; --border-width: 2px;
+  --shadow: 3px 3px 0 #7A2230;
+  --focus-shadow: 0 0 0 3px #F2E8D2, 0 0 0 6px #1B1410;       /* double ring */
+  --track: #CDB88F; --thumb: #7A2230; --thumb-ring: #F2E8D2; --thumb-shadow: 2px 2px 0 #1B1410;
+  /* paper: fine grain + large soft blotches over the base colour (decorative) */
+  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .33  0 0 0 0 .24  0 0 0 0 .12  0 0 0 .45 -.10'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012' numOctaves='3' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45  0 0 0 0 .32  0 0 0 0 .16  0 0 0 .55 -.14'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
+}
+
+/* ---------- Theme 2: 80s-90s (dark) ----------
+   Mood: black poster, bordeaux, smoky aura, hard condensed type, one mustard accent. */
+[data-theme="era-80-90"] {
+  color-scheme: dark;
+  --font-display: "Bebas Neue", "Impact", sans-serif;
+  --font-body: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --display-transform: uppercase; --display-tracking: .04em;
+  --bg: #090909;
+  --surface: #141111;
+  --surface-2: #1F1A19;
+  --text: #F2EEE6;
+  --text-muted: #B5ADA3;
+  --heading: #C72544;      /* deep crimson-bordeaux, large type only (>= 3:1) */
+  --primary: #8E1B2B;      /* bordeaux, buttons with white text */
+  --on-primary: #FFFFFF;
+  --accent: #F2B632;       /* mustard: selected option */
+  --on-accent: #0B0B0B;
+  --border: #8A8480;
+  --danger: #FF7A8A;
+  --link: #FF7A8A;
+  --focus: #FFFFFF;
+  --radius: 2px; --border-width: 1px;
+  --shadow: 0 0 0 1px #8E1B2B, 0 0 22px rgba(142,27,43,.45);
+  --focus-shadow: 0 0 0 2px #FFFFFF, 0 0 24px 8px rgba(255,90,110,.85);   /* glow */
+  --track: #3A1018; --thumb: #F2EEE6; --thumb-ring: #8E1B2B; --thumb-shadow: 0 0 10px rgba(199,37,68,.6);
+  /* smoke: bordeaux auras in the corners + soft turbulent smoke (decorative) */
+  --texture:
+    radial-gradient(ellipse 70% 55% at 12% 0%, rgba(142,27,43,.22), transparent 70%),
+    radial-gradient(ellipse 65% 50% at 100% 100%, rgba(142,27,43,.18), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='760' height='760'%3E%3Cfilter id='s' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.006 .011' numOctaves='4' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .56  0 0 0 0 .08  0 0 0 0 .16  0 0 0 1.0 -.42'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+}

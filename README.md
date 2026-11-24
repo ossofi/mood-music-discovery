@@ -1,134 +1,72 @@
-# Mood-Based Music Discovery
+# Mood Swing — Mood-Based Music Discovery
 
-Web application that turns a short mood quiz into a playlist and shows context (facts, related genres, lyrics links) next to each track. This repository currently contains the **database part**: a transactional (OLTP) PostgreSQL 16 database with migrations, reference data, test data and automated tests.
+A web application that turns a short mood quiz into a playlist and shows context (facts, related genres, lyrics links) next to each track.
 
 Author: Sofya Asinskaya
 
-## Repository structure
+## Project stages
 
-```
-database/
-  001_schema.sql          tables, keys, constraints, indexes (3NF)
-  002_logic.sql           triggers, views, materialized view, ranking and retention functions
-  003_roles.sql           roles and privileges
-  004_reference_data.sql  fixed data: sources, genres, mood tags, quiz questions and answer-to-tag rules
-  005_test_data.sql       DEMO data only (users, artists, tracks, tags, facts, quiz sessions)
-  006_tests.sql           29 integrity, business-rule and permission checks (rolls back)
-  DATA_DICTIONARY.md      tables, columns, types, keys, data-quality rules (generated)
-  er_diagram.svg / .png   logical schema, colour-coded by block
-  gen_dictionary.py       generator of the dictionary and diagram
-```
+| Stage | Folder | What it contains | How to run / read |
+|---|---|---|---|
+| 1. Database | [`database/`](database/) | PostgreSQL 16 schema, migrations, reference and demo data, 29 automated checks, ER diagram, data dictionary | [`database/README.md`](database/README.md) |
+| 2. API documentation | [`api/`](api/) | OpenAPI 3 contract, published docs, error catalogue, quiz-to-playlist tutorial, mock server | [see below](#stage-2-api-documentation) |
+| 3. Front-End SPA | [`frontend/`](frontend/) | React + TypeScript single-page app, tests, architecture and user-flow docs | [see below](#stage-3-front-end) |
+| 3. Adaptive UI | [`design/`](design/) | Design tokens (single source of truth), mockups for phone, tablet and desktop, Figma link | [see below](#adaptive-ui-mockups) |
 
-Migrations are numbered and applied in order. A schema change is a new numbered file; applied files are never edited. Each migration records itself in the `schema_migration` table.
+Each stage is tagged in Git: `stage-1-database`, `stage-2-api`, `stage-3-frontend`.
 
-## Requirements
+## Stage 2: API documentation
 
-- Docker (Docker Desktop on macOS/Windows), or a local PostgreSQL 16
-- A terminal (the commands below are for macOS/Linux; see the PowerShell note for Windows)
+- Contract: [`api/openapi.yaml`](api/openapi.yaml)
+- Rendered docs: [`api/docs/index.html`](api/docs/index.html) (open the file in a browser)
+- Guides: [`getting-started`](api/docs/getting-started.md), [`tutorial: quiz to playlist`](api/docs/tutorial-quiz-to-playlist.md), [`errors`](api/docs/errors.md), [`architecture`](api/docs/architecture.md), [`changelog`](api/docs/changelog.md)
 
-## Quick start (Docker)
-
-Port 5432 is often taken by a local PostgreSQL, so the container is exposed on **5433**.
+Run the mock server and lint the contract (Node 20+):
 
 ```bash
-docker run --name musicmood-db -e POSTGRES_PASSWORD=dev -p 5433:5432 -d postgres:16
-sleep 5
-docker exec musicmood-db psql -U postgres -c "CREATE DATABASE musicmood"
-
-cd database
-run() { f=$1; shift; docker exec -i musicmood-db psql -U postgres -d musicmood -v ON_ERROR_STOP=1 "$@" < "$f"; }
-run 001_schema.sql
-run 002_logic.sql
-run 003_roles.sql -v backend_password=devpass -v reporting_password=devpass
-run 004_reference_data.sql
-run 005_test_data.sql     # demo data, never load into production
-run 006_tests.sql         # expect 29 lines starting with "NOTICE:  PASS", no FAIL or ERROR
+cd api
+npm install
+npm run lint     # validate openapi.yaml
+npm run mock     # mock API on http://localhost:4010
+npm run docs     # rebuild docs/index.html
 ```
 
-**Windows PowerShell:** the `<` redirect is not available. Use
-`Get-Content 001_schema.sql | docker exec -i musicmood-db psql -U postgres -d musicmood -v ON_ERROR_STOP=1`
-for each file (add the `-v backend_password=... -v reporting_password=...` options for `003_roles.sql`).
+## Stage 3: Front-End
 
-### Start over from scratch
+React 19, TypeScript (strict), Vite, React Router, TanStack Query, Zustand, react-hook-form + zod. The app talks to the API from stage 2. Until the real backend is deployed, a mock API (MSW) with the same contract is used.
 
 ```bash
-docker exec musicmood-db psql -U postgres -c "DROP DATABASE musicmood"
-docker exec musicmood-db psql -U postgres -c "CREATE DATABASE musicmood"
+cd frontend
+npm install
+npm run dev:mock   # app on http://localhost:5173 with the mock API
+npm run test       # unit tests (Vitest)
+npm run e2e        # end-to-end tests (Playwright)
+npm run build      # production build
 ```
 
-then run the migrations again.
+Documentation: [`architecture`](frontend/docs/architecture.md), [`user flows`](frontend/docs/user-flows.md), [`tech stack`](frontend/docs/tech-stack.md).
 
-### Open a console
+Where the criteria are implemented:
 
-```bash
-docker exec -it musicmood-db psql -U postgres -d musicmood
-```
+- Components, pages and services: `frontend/src/components`, `src/pages`, `src/api`
+- Forms and validation: `frontend/src/lib/forms.ts` and the sign-in, register and quiz pages
+- Global error handling: `frontend/src/api/globalErrorHandler.ts`, `errors.ts` and `components/ToastHost.tsx`
+- Loading states: loading and error states in `frontend/src/components/ui.tsx` and the pages
+- Tests: `frontend/src/**/*.test.ts(x)` (unit), `frontend/e2e/` (end-to-end)
 
-From outside Docker (DBeaver, an application): host `localhost`, port `5433`, database `musicmood`.
+## Adaptive UI mockups
 
-## Try it
+- **Figma:** https://www.figma.com/design/YfUGStJHBuPh6xdfQIKPMn
+- **PDF (same mockups):** [`design/mockups/Mood-Swing-adaptive-ui-mockups.pdf`](design/mockups/Mood-Swing-adaptive-ui-mockups.pdf)
+- **Design tokens:** [`design/tokens/themes.css`](design/tokens/themes.css), used by the app and mirrored as variables in Figma
+- **Themes:** Golden Vinyl (light) and Walkman Black (dark)
 
-Playlist of the demo user Alice with the reason for each track:
+Adaptive behaviour in the code:
 
-```sql
-SELECT position, title, artist, score, matched_tags
-FROM v_playlist_explained WHERE playlist_id = 1 ORDER BY position;
-```
+- Three layouts: bottom tab bar under 768 px, top bar from 768 px, sidebar from 1100 px. Main navigation is available on all of them.
+- Relative units and a responsive grid, touch targets of at least 44 px, contrast of at least 4.5:1.
+- Automated check for overflow, overlaps and small targets: `frontend/scripts/responsive-audit.cjs` and `frontend/e2e/responsive.spec.ts`.
 
-Tag coverage by genre (data-coverage check):
+## Secrets
 
-```sql
-SELECT * FROM mv_tag_coverage;
-```
-
-The quiz with its answer-to-tag weights:
-
-```sql
-SELECT q.position AS q, q.prompt, o.position AS opt, o.label,
-       string_agg(mt.label || ' ' || ot.weight, ', ' ORDER BY ot.weight DESC) AS tags
-FROM quiz_question q
-JOIN quiz_option o ON o.question_id = q.question_id
-JOIN quiz_option_tag ot ON ot.option_id = o.option_id
-JOIN mood_tag mt ON mt.tag_id = ot.tag_id
-GROUP BY q.position, q.prompt, o.position, o.label
-ORDER BY q.position, o.position;
-```
-
-## How the ranking works
-
-`generate_playlist(session_id, limit)` runs in one transaction and computes
-
-```
-score = SUM(mood_weight * track_tag_weight) * balance_multiplier
-balance_multiplier = 0.5 + familiar_weight   for tracks the user has already heard
-                     1.5 - familiar_weight   for new tracks
-```
-
-Ties are broken by the lower `track_id`, so the same input always gives the same playlist. If fewer than `limit` tracks match, all available matches are returned; an incomplete quiz is rejected.
-
-## Roles
-
-| Role | Purpose |
-|---|---|
-| `app_read` | catalogue, taxonomy and safe views; no access to `app_user` (e-mail, password hashes) |
-| `app_write` | runtime data (users, quiz, playlists, history) and catalogue sync; cannot change reference data |
-| `app_admin` | reference data and schema management |
-| `backend_app` (login) | the API connects as this role; member of `app_write`; not a superuser |
-| `reporting_ro` (login) | read-only reporting; member of `app_read` |
-
-## Demo data (development only)
-
-Demo accounts: `alice@example.com`, `bob@example.com`, `carol@example.com`. They share one development password (see the comment at the top of `005_test_data.sql`); only a bcrypt hash is stored in the database. Never use these accounts or this password outside a development database.
-
-Track mood weights in the demo data are illustrative values for testing, not measured or provider data. Lyrics are not stored: only links to a licensed provider and an optional short excerpt (at most 200 characters).
-
-## Data sources (planned)
-
-The database stores a cache of the catalogue. Planned sources, called only from the backend: MusicBrainz (artists, recordings), Last.fm (mood tags), Wikidata (facts), official Spotify/Deezer embeds for playback. Check each provider's current terms of use before loading real data; Last.fm requires contacting them for academic use.
-
-## Known limitations
-
-- Tests depend on the demo data (playlist ids 1 and 2, demo user names) and work right after `005` on a clean database.
-- Not covered by tests: cascading deletion of a user, concurrent calls of `generate_playlist`, the `updated_at` trigger.
-- No raw/staging/mart layers, second DBMS or analytics: the topic does not require them.
-- Login throttling and token handling are application-layer concerns; the database has no session table.
+No keys or passwords are stored in this repository. The database scripts take passwords as command-line variables, and the demo values in the READMEs are for local development only.

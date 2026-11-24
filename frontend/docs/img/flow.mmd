@@ -1,0 +1,14 @@
+flowchart TD
+  A([Open app]) --> B{Signed in?}
+  B -- no --> L[Sign in / Register]
+  L -->|wrong password| L
+  L -->|success| Q
+  B -- yes --> Q[Mood quiz: 4 questions]
+  Q --> S[Familiar vs new slider]
+  S --> P[Playlist with matched moods]
+  P --> R[Rate mood fit 1-5]
+  P --> T[Track page: facts, genres, player]
+  T --> H[I listened: save to history]
+  H --> F[Feed: filter, search, sort]
+  P --> Hist[Playlists history]
+  F --> Pr[Profile: consent, delete data]
